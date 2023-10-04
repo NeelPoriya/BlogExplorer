@@ -4,4 +4,7 @@ class Blog {
   final String title;
 
   Blog({required this.id, required this.imageUrl, required this.title});
+
+  static Blog fromJson(json) =>
+      Blog(id: json['id'], imageUrl: json['image_url'], title: json['title']);
 }
