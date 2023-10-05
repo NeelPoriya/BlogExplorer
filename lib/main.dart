@@ -1,25 +1,26 @@
 import 'package:blog_explorer/models/Blog.dart';
-import 'package:blog_explorer/models/BlogFavorites.dart';
+import 'package:blog_explorer/models/FavouritesModel.dart';
 import 'package:flutter/material.dart';
 import 'package:hive/hive.dart';
 import 'package:hive_flutter/adapters.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-
+import 'package:path_provider/path_provider.dart' as path_provider;
 import 'package:provider/provider.dart';
 
 void main() async {
-  // await Hive.initFlutter();
+  WidgetsFlutterBinding.ensureInitialized();
 
-  // runApp(
-  //   ChangeNotifierProvider(
-  //     create: (context) => BlogFavorites(),
-  //     child: const BlogExplorerApp(),
-  //   ),
-  // );
+  final appDocumentDirectory =
+      await path_provider.getApplicationDocumentsDirectory();
+  Hive.init(appDocumentDirectory.path);
+  Hive.registerAdapter(BlogAdapter());
 
   runApp(
-    const BlogExplorerApp(),
+    ChangeNotifierProvider(
+      create: (context) => FavouritesModel(),
+      child: const BlogExplorerApp(),
+    ),
   );
 }
 
@@ -28,10 +29,12 @@ class BlogExplorerApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const MaterialApp(
-      title: 'Blog Explorer',
-      home: HomeScreen(),
-      debugShowCheckedModeBanner: false,
+    return Consumer(
+      builder: (context, blogFav, child) => const MaterialApp(
+        title: 'Blog Explorer',
+        home: HomeScreen(),
+        debugShowCheckedModeBanner: false,
+      ),
     );
   }
 }
@@ -46,13 +49,27 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   Future<List<Blog>> blogs = getBlogs();
 
-  // Future<void> loadBlogsFromLocal() async {
-  //   final box = await Hive.openBox<Blog>('blogsBox');
-  //   final loadedBlogs = box.values.toList();
-  //   setState(() {
-  //     blogs = Future(() => loadedBlogs);
-  //   });
-  // }
+  @override
+  void initState() {
+    super.initState();
+    loadBlogsFromLocal();
+  }
+
+  Future<void> loadBlogsFromLocal() async {
+    final box = await Hive.openBox<Blog>('blogsBox');
+    final loadedBlogs = box.values.toList();
+
+    // print('loadedBlogs: ${loadedBlogs}');
+
+    if (loadedBlogs.isEmpty) {
+      await getBlogs();
+      return;
+    }
+
+    setState(() {
+      blogs = Future(() => loadedBlogs);
+    });
+  }
 
   static Future<List<Blog>> getBlogs() async {
     const String url = 'https://intent-kit-16.hasura.app/api/rest/blogs';
@@ -68,11 +85,13 @@ class _HomeScreenState extends State<HomeScreen> {
         // Request successful, handle the response data here
         final data = json.decode(response.body);
 
-        // Save blogs to Hive
-        // final box = await Hive.openBox<Blog>('blogsBox');
-        // box.addAll(data['blogs']);
+        List<Blog> result = data['blogs'].map<Blog>(Blog.fromJson).toList();
 
-        return data['blogs'].map<Blog>(Blog.fromJson).toList();
+        // Save blogs to Hive
+        final box = await Hive.openBox<Blog>('blogsBox');
+        box.addAll(result);
+
+        return result;
       } else {
         // Request failed
         print('Request failed with status code: ${response.statusCode}');
@@ -96,7 +115,6 @@ class _HomeScreenState extends State<HomeScreen> {
           future: blogs,
           builder: (context, snapshot) {
             if (snapshot.hasData) {
-              print(snapshot.data!);
               return buildBlogsListView(snapshot.data!);
             } else {
               return const Center(
@@ -108,44 +126,18 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget buildBlogsListView(List<Blog> blogs) {
-    // return Consumer<BlogFavorites>(
-    //   builder: (context, blogFavorites, child) {
-    //     return ListView.builder(
-    //       itemCount: blogs.length,
-    //       itemBuilder: (BuildContext context, int index) {
-    //         final blog = blogs[index];
-    //         final isFavorite = blogFavorites.favoriteIds.contains(blog.id);
-    //         return ListTile(
-    //           leading: Image.network(blog.imageUrl),
-    //           title: Text(blog.title),
-    //           trailing: IconButton(
-    //             icon: Icon(
-    //               isFavorite ? Icons.favorite : Icons.favorite_border,
-    //               color: Colors.red,
-    //             ),
-    //             onPressed: () {
-    //               // Toggle the favorite status using the provider
-    //               context.read<BlogFavorites>().toggleFavorite(blog.id);
-    //             },
-    //           ),
-    //           onTap: () {
-    //             // Navigate to the blog details screen with 'blog' data
-    //             // You can implement this navigation as needed.
-    //           },
-    //         );
-    //       },
-    //     );
-    //   },
-    // );
-
     return ListView.builder(
       itemCount: blogs.length,
       itemBuilder: (context, index) {
         final blog = blogs[index];
 
+        final isFavourite =
+            context.read<FavouritesModel>().favourites.contains(blog.id);
+
         return GestureDetector(
           onTap: () {
-            print('you clicked on ${blog.title}');
+            print(
+                'you clicked on ${blog.title} and it is ${context.read<FavouritesModel>().favourites.contains(blog.id)}');
             Navigator.push(
               context,
               MaterialPageRoute(
@@ -166,16 +158,54 @@ class _HomeScreenState extends State<HomeScreen> {
                   fit: BoxFit.cover,
                 ),
                 Container(
-                    padding: const EdgeInsets.symmetric(
-                        vertical: 10.0, horizontal: 20.0),
-                    child: Text(
-                      blog.title,
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
+                  padding: const EdgeInsets.symmetric(
+                      vertical: 10.0, horizontal: 20.0),
+                  child: Text(
+                    blog.title,
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+                //Favourite icon here
+                GestureDetector(
+                  onTap: () {
+                    context.read<FavouritesModel>().toggleFavorite(blog.id);
+                  },
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      IconButton(
+                        icon: Icon(
+                          isFavourite
+                              ? Icons.favorite
+                              : Icons.favorite_border_outlined,
+                          color: Colors.red,
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            context
+                                .read<FavouritesModel>()
+                                .toggleFavorite(blog.id);
+                          });
+                        },
                       ),
-                      textAlign: TextAlign.center,
-                    )),
+                      Text(
+                        context
+                            .read<FavouritesModel>()
+                            .favourites
+                            .contains(blog.id)
+                            .toString(),
+                        style: TextStyle(
+                          color:
+                              blog.isFavorite ? Colors.red : Colors.pinkAccent,
+                        ),
+                      )
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
@@ -214,7 +244,50 @@ class _BlogDetailsViewState extends State<BlogDetailsView> {
               ),
             ),
           ),
-          const SizedBox(height: 20.0),
+          // Favourite icon here...
+          GestureDetector(
+            onTap: () {
+              setState(() {
+                context.read<FavouritesModel>().toggleFavorite(widget.blog.id);
+                setState(() {});
+              });
+            },
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton(
+                  icon: Icon(
+                    context
+                            .read<FavouritesModel>()
+                            .favourites
+                            .contains(widget.blog.id)
+                        ? Icons.favorite
+                        : Icons.favorite_border_outlined,
+                    color: Colors.red,
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      context
+                          .read<FavouritesModel>()
+                          .toggleFavorite(widget.blog.id);
+                      setState(() {});
+                    });
+                  },
+                ),
+                Text(
+                  context
+                      .read<FavouritesModel>()
+                      .favourites
+                      .contains(widget.blog.id)
+                      .toString(),
+                  style: TextStyle(
+                    color:
+                        widget.blog.isFavorite ? Colors.red : Colors.pinkAccent,
+                  ),
+                )
+              ],
+            ),
+          ),
           Image.network(
             widget.blog.imageUrl,
             width: double.infinity,
